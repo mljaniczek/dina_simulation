@@ -1,0 +1,197 @@
+---
+title: "Untitled"
+author: "Margaret Janiczek"
+date: "2025-05-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(igraph)
+library(matrixcalc)
+library(ggcorrplot)
+```
+
+
+Specify number of vertices and subnetworks
+
+Vertices: 100
+Subnetworks:4
+
+Using `sample.pa` function from `igraph` package, which uses a simple algorithm ("Preferential attachment") from Barabasi to generate a graph. It is a discrete time step model and in each time step a vertex is added. 
+
+* starts with a single vertex and no edges
+* adds a vertex in each time step and initiate some edges to old vertices
+* probability that old vertex is chosen given by: $P[i] \sim k_i^{\alpha} + a$
+* in each time step specify number of edges initiated or probability of a number of edges added.
+* specify if directed or undirected graph.
+
+Network generation parameters:
+
+n = number of vertices
+m = number of edges to add in each step
+
+
+```{r}
+
+set.seed(1219)
+
+#number of vertices
+p <- 100
+#number of subnetworks
+L <- 4
+p_sub <- p / L
+
+m <- 2
+power <- 1
+
+vsize <- 2
+par(mar = c(1, 1, 1, 1) + 0.5)
+
+
+# run algorithm on each subnetwork and join to make one network
+Omega_sub <- vector(mode = "list", length = L)
+for (l in 1:L) {
+  # barabasi was deprecated in igraph 2.0.0. says to use "sample_pa()" instead
+    G <- as.matrix(as_adjacency_matrix(sample_pa(p_sub, 
+                                                     power = power, m = m, 
+                                                     directed = FALSE)))
+    size <- sum(G) / 2
+    
+    a <- 0.6
+    b <-  0.9
+    samp_right <- runif(ceiling(size / 2), min = a, max = b)
+    samp_left <- runif(ceiling(size / 2), min = -b, max = -a)
+    samp <- sample(c(samp_left, samp_right), size)
+    ind <- 1
+    for (i in 2:p_sub) {
+        for (j in 1:(i - 1)) {
+            if (G[i, j] != 0) {
+                G[i, j] <- G[j, i] <- samp[ind]
+                ind <- ind + 1
+            }
+        }
+    }
+    
+    Omega_sub[[l]] <- G
+}
+
+Omega1 <- matrix(0, nrow = p, ncol = p)
+for (l in 1:L) {
+    Omega1[((l - 1) * p_sub + 1):(l * p_sub), 
+           ((l - 1) * p_sub + 1):(l * p_sub)] <- Omega_sub[[l]]
+}
+ggcorrplot(Omega1)
+```
+
+
+```{r}
+# get non-zero values and make adjacency matrix
+G1 <- Omega1 != 0
+G1_graph <- graph_from_adjacency_matrix(G1, mode = "undirected")
+gsize(G1_graph)
+layout <- layout_nicely(G1_graph)
+plot(G1_graph, vertex.frame.color = "white", 
+     layout = layout,
+     vertex.label = NA, vertex.color = "dodgerblue4", vertex.size = vsize,
+     edge.width = 3)
+```
+
+Check if matrix is positive definite, and if not, add a small value
+```{r}
+is.positive.definite(Omega1)
+diag(Omega1) <- rowSums(abs(Omega1)) + 0.1
+is.positive.definite(Omega1)
+ggcorrplot(Omega1)
+```
+
+Now use `solve()` function to get inverse i.e. Precision matrix.
+
+```{r}
+Sigma1 <- solve(Omega1)
+ggcorrplot(Sigma1)
+```
+
+Now generate second graph. Use`rewire` function in `igraph` package and `keeping_degseq` method which randomly rewires 
+
+```{r}
+
+p <-  100
+#L <-  4
+#p_sub <-  p / L
+
+G2_graph <- rewire(G1_graph, keeping_degseq(niter = 30))
+G_diff_graph <- igraph::union(igraph::difference(G1_graph, G2_graph), 
+                        igraph::difference(G2_graph, G1_graph))
+gsize(G_diff_graph)
+G2 <- as.matrix(as_adjacency_matrix(G2_graph))
+G_diff <- as.matrix(as_adjacency_matrix(G_diff_graph))
+{
+    common <- intersection(G1_graph, G2_graph)
+    E(common)$color <- 1
+    
+    diff21 <- add_edges(common, 
+                        as.vector(t(as_edgelist(difference(G2_graph, G1_graph)))),
+                        color = "2")
+    diff12 <- add_edges(common, 
+                        as.vector(t(as_edgelist(difference(G1_graph, G2_graph)))),
+                        color = "2")
+    vsize <- 2
+    
+    plot(diff12, vertex.frame.color = "white", 
+         layout = layout, 
+         vertex.label = NA, vertex.color = "dodgerblue4", vertex.size = vsize,
+         edge.width = 3)
+    
+    plot(diff21, vertex.frame.color = "white", 
+         layout = layout, 
+         vertex.label = NA, vertex.color = "dodgerblue4", vertex.size = vsize,
+         edge.width = 3)
+    
+    E(G_diff_graph)$color <- 2
+    plot(G_diff_graph, vertex.frame.color = "white", 
+         layout = layout, 
+         vertex.label = NA, vertex.color = "dodgerblue4", vertex.size = vsize,
+         edge.width = 3)
+    
+}
+
+ggcorrplot(Omega1)
+diag(G2) <- 1
+Omega2 <- Omega1 * G2
+ggcorrplot(Omega2)
+diag(G2) <- 0
+ggcorrplot(G2)
+
+size <- gsize(G_diff_graph)
+
+a <- 0.6
+b <- 0.9
+samp_right <- runif(ceiling(size / 2), min = a, max = b)
+samp_left <- runif(ceiling(size / 2), min = -b, max = -a)
+samp <- sample(c(samp_left, samp_right), size)
+ind <-  1
+for (i in 2:p) {
+    for (j in 1:(i - 1)) {
+        if (G2[i, j] != 0 & G1[i, j] == 0) {
+            Omega2[i, j] <- Omega2[j, i] <- samp[ind]
+            ind <- ind + 1
+        }
+    }
+}
+
+is.positive.definite(Omega1)
+is.positive.definite(Omega2)
+#diag(Omega2) <- diag(Omega2) + 0.1
+is.positive.definite(Omega2)
+ggcorrplot(Omega1)
+ggcorrplot(Omega2)
+
+ggcorrplot(Sigma1)
+Sigma2 <-  solve(Omega2)
+ggcorrplot(Sigma2)
+```
+
