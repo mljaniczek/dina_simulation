@@ -16,6 +16,8 @@ library(ggcorrplot)
 ```
 
 
+# Using code adapted from Plaksienko
+
 Using `sample.pa` function from `igraph` package, which uses a simple algorithm ("Preferential attachment") from Barabasi to generate a graph. It is a discrete time step model and in each time step a vertex is added. 
 
 * starts with a single vertex and no edges
@@ -28,6 +30,8 @@ Network generation parameters:
 
 n = number of vertices
 m = number of edges to add in each step
+
+Plaksienko generates 4 subgraphs for each graph. In one setting they remove an entire subgraph for use within the simulation. 
 
 
 ```{r}

@@ -1,0 +1,185 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-05-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(jewel)
+library(tidyverse)
+library(JGL)
+library(pROC)
+
+library(spikeyglass)
+
+devtools::install_github("mljaniczek/spikeyglass")
+
+```
+
+For all data, n = 1000 per arm, p = 500, k = 2 groups. 
+
+
+Data generation 1: using a function from the `jewel` package
+
+```{r}
+
+set.seed(1219)
+K <- 2
+p <- 200
+n <- 1000
+data <- generateData_rewire(K = K, p = p, n = n, perc = .25)
+G_list_true <- data$Graphs
+G_common_true <- data$CommonGraph
+X <- data$Data
+```
+
+
+# FGL 
+
+Tune parameters, then run with tuned parameters. 
+
+```{r}
+# now tuning lambda
+
+interval_l = 10
+lambda.eff <- seq(0.01, 0.4, len = interval_l)
+aic_vec1 <- matrix(NA, length(lambda.eff), 1) #for lambda1
+aic_vec2 <- matrix(NA, length(lambda.eff), 1) #for lambda2
+
+
+#search length of lambda1, keeping lambda2 constant and small
+start.time = Sys.time()
+for(i in 1:length(lambda.eff)){
+  fit00 <- JGL(Y=X,penalty="fused",lambda1=lambda.eff[i],lambda2=lambda.eff[1], return.whole.theta=TRUE)
+  aic_vec1[i,1] <- vBIC(X, fit00, thr=0.0001)
+}
+
+# identify which had min aic
+i_idx <- which(aic_vec1 == min(aic_vec1), arr.ind = TRUE)[1,1]
+#assign tuned lambda1 based on your search
+lam_1 <- lambda.eff[i_idx]
+
+#now search for lambda2, using value of lambda1 learned above
+for(j in 1:length(lambda.eff)){
+  fit00 <- JGL(Y=X,penalty="group",lambda1=lambda.eff[i_idx],lambda2=lambda.eff[j], return.whole.theta=TRUE)
+  aic_vec2[j,1] <- vBIC(X, fit00, thr=0.0001)
+}
+
+# identify which lambda2 had min aic
+j_idx <- which(aic_vec2 == min(aic_vec2), arr.ind = TRUE)[1,1]
+#assign tuned lambda1 based on your search
+lam_2 <- lambda.eff[j_idx]
+
+end.time = Sys.time()
+
+end.time-start.time
+
+# 6.33 minutes for 500 features, 1000 per arm
+# 48 seconds for 200 features, 1000 per arm
+
+res_fgl <- JGL(Y=X,
+                         penalty="fused",
+                         lambda1= lam_1,
+                         lambda2= lam_2,
+                         return.whole.theta=TRUE)
+
+save(res_fgl, file = "fgl_res_n1000p200.rdata")
+
+# get 5% percentile of absolute value of empirical dist
+thresh <- quantile(abs(realDataHist$mids), .025)
+
+curr_res1 <-  (abs(res_fgl$theta[[1]]) > thresh)*1
+
+diag(curr_res1) = 0
+
+
+curr_perf1 <- evaluatePerformance(data$Graphs$G1, curr_res1)
+
+curr_res2 <-  (abs(res_fgl$theta[[2]]) > thresh)*1
+
+diag(curr_res2) = 0
+
+
+curr_perf2 <- evaluatePerformance(data$Graphs$G2, curr_res2)
+
+
+res_df <- data.frame(
+  tpr = curr_perf1[[1]]/(curr_perf1[[1]] + curr_perf1[[4]]),
+  fpr = curr_perf1[[3]]/(curr_perf1[[3]] + curr_perf1[[2]]),
+  auc = auc(roc(data$Graphs$G1 ~ curr_res1))
+  
+)
+
+res_df
+```
+
+
+# SSJGL 
+
+```{r}
+set.seed(1219)
+
+# penalty <- "fused"
+# lam1 <- 1
+# lam2 <- 1
+# v1 <- 1
+# lam.eff <- lam1 + c(1:10) * 5
+# v0s <- lam1/lam.eff
+# 
+# start.time = Sys.time()
+# ssjgl_res <- ssjgl(Y=X,penalty=penalty,lambda0=1, lambda1=lam1,
+#                    lambda2=lam2, v1 = v1, v0s = v0s, a=1, b=p, doubly=TRUE, normalize=FALSE)
+# end.time = Sys.time()
+# end.time-start.time
+
+#save(ssjgl_res, file = "ssjgl_res_n1000p200.rdata")
+
+load("ssjgl_res_n1000p200.rdata")
+
+# extract all estimated covariance matrices from result
+ssjgl_covar_matrices <- ssjgl_res$thetalist[[length(v0s)]]
+ss_res1 <- (abs(ssjgl_covar_matrices[[1]])>thresh)*1
+diag(ss_res1) = 0
+ss_perf1 <- evaluatePerformance(data$Graphs$G1, ss_res1)
+
+ss_res_df <- data.frame(
+  tpr = ss_perf1[[1]]/(ss_perf1[[1]] + ss_perf1[[4]]),
+  fpr = ss_perf1[[3]]/(ss_perf1[[3]] + ss_perf1[[2]]),
+  auc = auc(roc(data$Graphs$G1~ss_res1))
+  
+)
+# 16 minutes
+
+ss_res_df
+```
+
+
+#rags2ridges
+
+```{r}
+library(rags2ridges)
+# define targe fused 
+ns = c(n, n)
+tlist <- default.target.fused(data$Sigma, ns)
+
+# Obtain regularized precision under optimal penalty
+opt <- optPenalty.fused.auto(X, tlist, cv.method = "aLOOCV",
+                            maxit.ridgeP.fused = 100)
+# Use the optimal penalties
+Plist <- ridgeP.fused(data$ , ns, lambda = opt$lambda, maxit = 100)
+
+# Determine support regularized (standardized) precision under optimal penalty
+res <- sparsify.fused(Plist, threshold = "top", verbose = FALSE)
+round(res[[1]]$sparsePrecision, 1)
+round(res[[2]]$sparsePrecision, 1)
+```
+
+
+
+
+

@@ -5,6 +5,42 @@ library(MASS)
 library(moments)
 library(pracma)
 
+# read in reference weights
+realDataHist = read.csv("mxDist.csv")
+
+# sample network data
+sampleNetworkData = function(N, covMat)
+{
+  sample = mvrnorm(N, mu = rep(0,nrow(covMat)), covMat)
+  return(sample)
+}
+
+
+#### Assign Edge Weights ####
+
+assignRealDataEdgeWeights = function(graph,ehist)
+{
+  P = length(V(graph))
+  weights = sample(ehist$mids, replace=T,size=length(E(graph)), prob=ehist$density)  
+  E(graph)$weights = weights
+  precMat = -1*as_adjacency_matrix(graph, attr = c("weights"), type="both") + diag(P)
+  return(list(graph, precMat))
+}
+
+#### Adjust Covariance Matrices to be Positive Definite ####
+
+boost = function(myMatrix)
+{
+  minEig = min(eigen(myMatrix)$values)
+  if(minEig < 0)
+  {
+    print("Boosting!")
+    return(myMatrix - minEig*1.01*diag(ncol(myMatrix)))
+  }
+  else
+    return(myMatrix)
+}
+
 #### Make Gold Standard Network Structures #### 
 
 makeGoldStandardNets = function(P, reference_file)
@@ -29,37 +65,10 @@ makeGoldStandardNets = function(P, reference_file)
   print(sfHighDensity)
   print(sfLowDensity)
   
-  #### Assign Edge Weights ####
-  
-  assignRealDataEdgeWeights = function(graph,ehist)
-  {
-    P = length(V(graph))
-    weights = sample(ehist$mids, replace=T,size=length(E(graph)), prob=ehist$density)  
-    E(graph)$weights = weights
-    precMat = -1*as_adjacency_matrix(graph, attr = c("weights"), type="both") + diag(P)
-    return(list(graph, precMat))
-  }
-  
-  realDataHist = read.csv(reference_file)
-  
-  erHighRealData = assignRealDataEdgeWeights(erHigh,ehist=realDataHist)
-  erLowRealData = assignRealDataEdgeWeights(erLow,ehist=realDataHist)
-  sfHighRealData = assignRealDataEdgeWeights(sfHigh,ehist=realDataHist)
-  sfLowRealData = assignRealDataEdgeWeights(sfLow,ehist=realDataHist)
-  
-  #### Adjust Covariance Matrices to be Positive Definite ####
-  
-  boost = function(myMatrix)
-  {
-    minEig = min(eigen(myMatrix)$values)
-    if(minEig < 0)
-    {
-      print("Boosting!")
-      return(myMatrix - minEig*1.01*diag(ncol(myMatrix)))
-    }
-    else
-      return(myMatrix)
-  }
+  erHighRealData = assignRealDataEdgeWeights(erHigh,ehist=reference_file)
+  erLowRealData = assignRealDataEdgeWeights(erLow,ehist=reference_file)
+  sfHighRealData = assignRealDataEdgeWeights(sfHigh,ehist=reference_file)
+  sfLowRealData = assignRealDataEdgeWeights(sfLow,ehist=reference_file)
   
   erLowPrecRealDataBoost = boost(erLowRealData[[2]])
   erHighPrecRealDataBoost = boost(erHighRealData[[2]])
@@ -80,7 +89,7 @@ makeGoldStandardNets = function(P, reference_file)
   return(adjMatListRealData)
 }
 
-test <- makeGoldStandardNets(50, "mxDist.csv")
+test <- makeGoldStandardNets(50, realDataHist)
 
 test2 <- as.matrix(test[[1]])
 t1 <- test2 != 0
