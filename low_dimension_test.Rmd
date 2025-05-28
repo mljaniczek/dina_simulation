@@ -17,7 +17,7 @@ library(pROC)
 
 library(spikeyglass)
 
-devtools::install_github("mljaniczek/spikeyglass")
+#devtools::install_github("mljaniczek/spikeyglass")
 
 ```
 

@@ -14,6 +14,7 @@ library(jewel)
 library(tidyverse)
 library(JGL)
 library(pROC)
+library(tictoc)
 
 library(spikeyglass)
 
@@ -30,8 +31,8 @@ Data generation 1: using a function from the `jewel` package
 
 set.seed(1219)
 K <- 2
-p <- 1000
-n <- 200
+p <- 500
+n <- 1000
 data <- generateData_rewire(K = K, p = p, n = n, perc = .25)
 G_list_true <- data$Graphs
 G_common_true <- data$CommonGraph
@@ -53,11 +54,28 @@ aic_vec2 <- matrix(NA, length(lambda.eff), 1) #for lambda2
 
 
 #search length of lambda1, keeping lambda2 constant and small
-start.time = Sys.time()
+tic()
 for(i in 1:length(lambda.eff)){
   fit00 <- JGL(Y=X,penalty="fused",lambda1=lambda.eff[i],lambda2=lambda.eff[1], return.whole.theta=TRUE)
   aic_vec1[i,1] <- vBIC(X, fit00, thr=0.0001)
 }
+toc()
+
+tic()
+lapply(1:length(lambda.eff), function(i) {
+  fit00 <- JGL(Y=X, penalty="fused", lambda1=lambda.eff[i], lambda2=lambda.eff[1], return.whole.theta=TRUE)
+  aic_vec1[i,1] <<- vBIC(X, fit00, thr=0.0001)  # Use <<- to assign to the outer scope
+})
+toc()
+
+library(pbmcapply)
+tic()
+MC_results <- pbmclapply(1:length(lambda.eff), 
+                         function(i) {
+  fit00 <- JGL(Y=X, penalty="fused", lambda1=lambda.eff[i], lambda2=lambda.eff[1], return.whole.theta=TRUE)
+  aic_vec1[i,1] <<- vBIC(X, fit00, thr=0.0001)  # Use <<- to assign to the outer scope
+}, mc.cores = detectCores() - 1)
+toc()
 
 # identify which had min aic
 i_idx <- which(aic_vec1 == min(aic_vec1), arr.ind = TRUE)[1,1]
@@ -79,10 +97,11 @@ end.time = Sys.time()
 
 end.time-start.time
 
-# 6.33 minutes for 500 features, 1000 per arm
+# 6.33 minutes for 500 features, 1000 per arm (112 seconds when in parallel!!) 
 # 48 seconds for 200 features, 1000 per arm
+# 1.16 hours for 1000 features, 200 per arm- lam_1 0.356, lam_2 0.01
 
-res_fgl <- JGL(Y=X,
+res_fgl_hd <- JGL(Y=X,
                          penalty="fused",
                          lambda1= lam_1,
                          lambda2= lam_2,
@@ -91,7 +110,7 @@ res_fgl <- JGL(Y=X,
 # get 5% percentile of absolute value of empirical dist
 thresh <- quantile(abs(realDataHist$mids), .025)
 
-curr_res1 <-  (abs(res_fgl$theta[[1]]) > thresh)*1
+curr_res1 <-  (abs(res_fgl_hd$theta[[1]]) > thresh)*1
 
 diag(curr_res1) = 0
 
@@ -122,19 +141,21 @@ res_df
 ```{r}
 set.seed(1219)
 
-# penalty <- "fused"
-# lam1 <- 1
-# lam2 <- 1
-# v1 <- 1
-# lam.eff <- lam1 + c(1:10) * 5
-# v0s <- lam1/lam.eff
-# 
-# start.time = Sys.time()
-# ssjgl_res <- ssjgl(Y=X,penalty=penalty,lambda0=1, lambda1=lam1,
-#                    lambda2=lam2, v1 = v1, v0s = v0s, a=1, b=p, doubly=TRUE, normalize=FALSE)
-# end.time = Sys.time()
-# end.time-start.time
+penalty <- "fused"
+lam1 <- 1
+lam2 <- 1
+v1 <- 1
+lam.eff <- lam1 + c(1:5) * 5
+v0s <- lam1/lam.eff
 
+start.time = Sys.time()
+ssjgl_res <- ssjgl(Y=X,penalty=penalty,lambda0=1, lambda1=lam1,
+                   lambda2=lam2, v1 = v1, v0s = v0s, a=1, b=p, doubly=TRUE, normalize=FALSE)
+end.time = Sys.time()
+end.time-start.time
+
+# 16 minutes for n 1000 p 200
+# __ minutes for n 200 p 1000
 #save(ssjgl_res, file = "ssjgl_res_n1000p200.rdata")
 
 load("ssjgl_res_n1000p200.rdata")
