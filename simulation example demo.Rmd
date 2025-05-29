@@ -1,0 +1,254 @@
+---
+title: "Example simulation setup"
+output: pdf_document
+date: "2025-05-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(jewel)
+library(tidyverse)
+library(JGL)
+library(pROC)
+library(pheatmap)
+library(MASS)
+
+library(spikeyglass)
+
+source("00_helper_functions.R")
+source("01_generate_gold_standard_networks.R")
+
+# read in reference weights
+realDataHist = read.csv("mxDist.csv")
+lower <- quantile(weights, .25)
+upper <- quantile(weights, .75)
+
+new_realdat <- realDataHist %>%
+  filter(abs(mids) > upper) 
+
+min_weight <- min(new_realdat$density[new_realdat$density > 0])
+
+new_realdat <- new_realdat %>%
+  mutate(density = ifelse(density ==0, min_weight, density))
+```
+
+Generate gold standard networks
+
+
+First generate graph for network 1. We are generating under 2 different topologies: random or scale free. 
+
+```{r}
+set.seed(1219)
+
+# low density
+dens1 = 0.06
+
+
+# high density
+dens2 = 0.2
+  
+K <- 2 # number of groups
+p <- 50# number of vertices
+n <- 1000 # number of samples per group
+
+# number of subnetworks
+L <- 4
+p_sub <- p/L  # features per subnetwork
+
+
+# percent of edges to rewire
+perc <- 0.1
+
+g1_random_low = sample_gnp(p, dens1)
+g1_random_high = sample_gnp(p, dens2)
+
+g1_islands = sample_islands(4, 25, 5/10, 1)
+
+g1_sf_low = sample_pa(n=p, power=1, m=2, directed=F)
+g1_sf_high = sample_pa(n=p, power=1, m=5, directed=F)
+
+
+```
+
+
+Now rewire the G1 graph to get G2, then set edge weights in two ways: one using empirical distribution (Shutta) and another using uniform distribution (Plaksienko). 
+
+```{r}
+gold_random_low <- gen_gold(g1_random_low, perc, new_realdat)
+gold_random_high <- gen_gold(g1_random_high, perc, new_realdat)
+gold_sf_low <- gen_gold(g1_sf_low, perc, new_realdat)
+gold_sf_high <- gen_gold(g1_sf_high, perc, new_realdat)
+```
+
+Now generate the data. 
+
+```{r}
+dat_random_low <- gen_dat(gold_random_low, n)
+dat_random_high <- gen_dat(gold_random_high, n)
+dat_sf_low <- gen_dat(gold_sf_low, n)
+dat_sf_high <- gen_dat(gold_sf_high, n)
+```
+
+Run FGL. Tune lambdas, run FGL with tuned parameters, capture metrics. 
+
+```{r}
+thresh = 0.01
+fgl_random_low_empirical <- tune_jgl(dat_random_low$emp_dat,
+                                     threshold = thresh, 
+                                     truth = gold_random_low, 
+                                     true_omega1 = gold_random_low$omega$o1_emp, 
+                                     true_omega2 = gold_random_low$omega$o2_emp,
+                                     setting = "FGL Random Graph Low Density Empirical Weights")
+
+fgl_random_low_unif <- tune_jgl(dat_random_low$unif_dat,
+                                     threshold = thresh, 
+                                     truth = gold_random_low, 
+                                     true_omega1 = gold_random_low$omega$o1_unif, 
+                                     true_omega2 = gold_random_low$omega$o2_unif,
+                                setting = "FGL Random Graph Low Density Uniform Weights"
+                                )
+
+fgl_random_high_empirical <- tune_jgl(dat_random_high$emp_dat,
+                                     threshold = thresh, 
+                                     truth = gold_random_high, 
+                                     true_omega1 = gold_random_high$omega$o1_emp, 
+                                     true_omega2 = gold_random_high$omega$o2_emp,
+                                     setting = "FGL Random Graph High Density Empirical Weights")
+
+fgl_random_high_unif <- tune_jgl(dat_random_high$unif_dat,
+                                     threshold = thresh, 
+                                     truth = gold_random_high, 
+                                     true_omega1 = gold_random_high$omega$o1_unif, 
+                                     true_omega2 = gold_random_high$omega$o2_unif,
+                                setting = "FGL Random Graph High Density Uniform Weights"
+                                )
+
+
+fgl_sf_low_empirical <- tune_jgl(dat_sf_low$emp_dat,
+                                     threshold = thresh, 
+                                     truth = gold_sf_low, 
+                                     true_omega1 = gold_sf_low$omega$o1_emp, 
+                                     true_omega2 = gold_sf_low$omega$o2_emp,
+                                     setting = "FGL Scale Free Graph Low Density Empirical Weights")
+
+fgl_sf_low_unif <- tune_jgl(dat_sf_low$unif_dat,
+                                     threshold = thresh, 
+                                     truth = gold_sf_low, 
+                                     true_omega1 = gold_sf_low$omega$o1_unif, 
+                                     true_omega2 = gold_sf_low$omega$o2_unif,
+                                setting = "FGL Scale Free Graph Low Density Uniform Weights"
+                                )
+
+fgl_sf_high_empirical <- tune_jgl(dat_sf_high$emp_dat,
+                                     threshold = thresh, 
+                                     truth = gold_sf_high, 
+                                     true_omega1 = gold_sf_high$omega$o1_emp, 
+                                     true_omega2 = gold_sf_high$omega$o2_emp,
+                                     setting = "FGL Scale Free Graph High Density Empirical Weights")
+
+fgl_sf_high_unif <- tune_jgl(dat_sf_high$unif_dat,
+                                     threshold = thresh, 
+                                     truth = gold_sf_high, 
+                                     true_omega1 = gold_sf_high$omega$o1_unif, 
+                                     true_omega2 = gold_sf_high$omega$o2_unif,
+                                setting = "FGL Scale Free Graph High Density Uniform Weights"
+                                )
+
+
+
+```
+
+Now run Bayesian Spike and Slab fused graphical lasso on same 8 settings. 
+
+```{r}
+ssfgl_random_low_empirical <- run_ssjgl(dat_random_low$emp_dat,
+                                     threshold = thresh, 
+                                     truth = gold_random_low, 
+                                     true_omega1 = gold_random_low$omega$o1_emp, 
+                                     true_omega2 = gold_random_low$omega$o2_emp,
+                                     setting = "SS-FGL Random Graph Low Density Empirical Weights")
+
+ssfgl_random_low_unif <- run_ssjgl(dat_random_low$unif_dat,
+                                     threshold = thresh, 
+                                     truth = gold_random_low, 
+                                     true_omega1 = gold_random_low$omega$o1_unif, 
+                                     true_omega2 = gold_random_low$omega$o2_unif,
+                                setting = "SS-FGL Random Graph Low Density Uniform Weights"
+                                )
+
+ssfgl_random_high_empirical <- run_ssjgl(dat_random_high$emp_dat,
+                                     threshold = thresh, 
+                                     truth = gold_random_high, 
+                                     true_omega1 = gold_random_high$omega$o1_emp, 
+                                     true_omega2 = gold_random_high$omega$o2_emp,
+                                     setting = "SS-FGL Random Graph High Density Empirical Weights")
+
+ssfgl_random_high_unif <- run_ssjgl(dat_random_high$unif_dat,
+                                     threshold = thresh, 
+                                     truth = gold_random_high, 
+                                     true_omega1 = gold_random_high$omega$o1_unif, 
+                                     true_omega2 = gold_random_high$omega$o2_unif,
+                                setting = "SS-FGL Random Graph High Density Uniform Weights"
+                                )
+
+
+ssfgl_sf_low_empirical <- run_ssjgl(dat_sf_low$emp_dat,
+                                     threshold = thresh, 
+                                     truth = gold_sf_low, 
+                                     true_omega1 = gold_sf_low$omega$o1_emp, 
+                                     true_omega2 = gold_sf_low$omega$o2_emp,
+                                     setting = "SS-FGL Scale Free Graph Low Density Empirical Weights")
+
+ssfgl_sf_low_unif <- run_ssjgl(dat_sf_low$unif_dat,
+                                     threshold = thresh, 
+                                     truth = gold_sf_low, 
+                                     true_omega1 = gold_sf_low$omega$o1_unif, 
+                                     true_omega2 = gold_sf_low$omega$o2_unif,
+                                setting = "SS-FGL Scale Free Graph Low Density Uniform Weights"
+                                )
+
+ssfgl_sf_high_empirical <- run_ssjgl(dat_sf_high$emp_dat,
+                                     threshold = thresh, 
+                                     truth = gold_sf_high, 
+                                     true_omega1 = gold_sf_high$omega$o1_emp, 
+                                     true_omega2 = gold_sf_high$omega$o2_emp,
+                                     setting = "SS-FGL Scale Free Graph High Density Empirical Weights")
+
+ssfgl_sf_high_unif <- run_ssjgl(dat_sf_high$unif_dat,
+                                     threshold = thresh, 
+                                     truth = gold_sf_high, 
+                                     true_omega1 = gold_sf_high$omega$o1_unif, 
+                                     true_omega2 = gold_sf_high$omega$o2_unif,
+                                setting = "SS-FGL Scale Free Graph High Density Uniform Weights"
+                                )
+
+
+
+```
+
+
+List of results
+
+```{r}
+
+
+res_p50_n1000 <- bind_rows(fgl_random_high_unif, ssfgl_random_high_unif, 
+                 fgl_random_low_unif, ssfgl_random_low_unif,
+                 fgl_sf_high_unif, ssfgl_sf_high_unif,
+                  fgl_sf_low_unif, ssfgl_sf_low_unif,
+                 fgl_random_high_empirical, ssfgl_random_high_empirical, 
+                 fgl_random_low_empirical,  ssfgl_random_low_empirical,
+                 fgl_sf_high_empirical,ssfgl_sf_high_empirical,
+                 fgl_sf_low_empirical, ssfgl_sf_low_empirical
+                )
+
+save(res_p250_n10000, file = "fullres_n10000_p250.Rdata")
+
+load()
+gt::gt(res_p250_n10000)
+```
+
+
+
+

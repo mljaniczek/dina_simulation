@@ -2,6 +2,9 @@
 # Set development values for simulation parameters
 #------------------------------------------------------
 
+# library(simhelpers)
+# 
+# create_skeleton()
 # What are your model parameters?
 # What are your design parameters?
 

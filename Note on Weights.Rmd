@@ -57,6 +57,29 @@ As we can see below, by sampling the weights using the empirical distribution, t
 
 weights = sample(realDataHist$mids, replace=T,size=length(E(g1)), prob=realDataHist$density)  
 
+summary(weights)
+summary(realDataHist)
+
+lower <- quantile(weights, .25)
+upper <- quantile(weights, .75)
+
+
+new_realdat <- realDataHist %>%
+  filter(abs(mids) > upper) 
+
+min_weight <- min(new_realdat$density[new_realdat$density > 0])
+
+new_realdat <- new_realdat %>%
+  mutate(new_dens = ifelse(density ==0, min_weight, density))
+
+new_weights = sample(new_realdat$mids, replace = T, size = 1000, prob = new_realdat$new_dens)
+
+dens_weight <- 100/sum(new_realdat$new_dens)
+
+new_weights_adj = sample(new_realdat$mids, replace = T, size = 1000, prob = new_realdat$new_dens_adj)
+
+new_realdat <- new_realdat %>%
+  mutate(new_dens_adj = new_dens*(100/sum(new_realdat$new_dens)))
 ggplot(data.frame(emp_val = weights), aes(x = emp_val)) +
   geom_histogram() +
   labs(title = "Distribution of weights used in Shutta simulation")
