@@ -53,6 +53,8 @@ realDataHist = read.csv("mxDist.csv")
 
 As we can see below, by sampling the weights using the empirical distribution, the generated weights for the same graph above are more closely centered around zero, with fewer large values. This would reflect real world data than the uniform distribution above.
 
+For weights to use in my simulation I took 1000 samples of the empirical weights with their probabilities, then set a cutoff for 75th percentile, which turned out to be 0.035. I then set any values with 0 weight to have equal the minimum weight of the remaining values. 
+
 ```{r}
 
 weights = sample(realDataHist$mids, replace=T,size=length(E(g1)), prob=realDataHist$density)  
@@ -80,9 +82,11 @@ new_weights_adj = sample(new_realdat$mids, replace = T, size = 1000, prob = new_
 
 new_realdat <- new_realdat %>%
   mutate(new_dens_adj = new_dens*(100/sum(new_realdat$new_dens)))
-ggplot(data.frame(emp_val = weights), aes(x = emp_val)) +
-  geom_histogram() +
-  labs(title = "Distribution of weights used in Shutta simulation")
+
+
+ggplot(data.frame(emp_val = new_weights), aes(x = emp_val)) +
+  geom_histogram(bins = 40) +
+  labs(title = "Distribution of empirical weights used in Shutta simulation")
 
 # ggplot(realDataHist, aes(x = mids, y = density)) +
 #   geom_bar(stat = "identity")
